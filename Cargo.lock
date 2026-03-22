@@ -873,8 +873,6 @@ dependencies = [
 [[package]]
 name = "axplat-riscv64-visionfive2"
 version = "0.1.0-pre.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "662ba689afa1972ce4addf32f7873c0aa7bc4ca11be17b69977f677805a2d356"
 dependencies = [
  "axconfig-macros",
  "axcpu",

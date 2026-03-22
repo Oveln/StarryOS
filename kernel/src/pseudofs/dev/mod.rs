@@ -5,6 +5,7 @@ mod event;
 mod fb;
 #[cfg(feature = "dev-log")]
 mod log;
+mod ipi;
 mod r#loop;
 #[cfg(feature = "memtrack")]
 mod memtrack;
@@ -266,6 +267,17 @@ fn builder(fs: Arc<SimpleFs>) -> DirMaker {
             NodeType::CharacterDevice,
             DeviceId::new(10, 1024),
             Arc::new(CpuDmaLatency),
+        ),
+    );
+
+    // IPI device - sends SBI IPI to hart 0 on write
+    root.add(
+        "ipi",
+        Device::new(
+            fs.clone(),
+            NodeType::CharacterDevice,
+            DeviceId::new(10, 200),
+            Arc::new(ipi::IpiDevice::new()),
         ),
     );
 
