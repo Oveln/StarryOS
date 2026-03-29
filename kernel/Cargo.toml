@@ -109,3 +109,8 @@ riscv = "0.16"
 
 [target.'cfg(not(any(target_arch = "aarch64", target_arch = "loongarch64")))'.dependencies]
 page_table_multiarch = { version = "0.6", features = ["copy-from"] }
+
+# Inter-system communication via shared memory
+ov-channal = { git = "https://github.com/Oveln/ov_channal", rev = "41744b81f90e4a6c68ede8ff85570113f8539035" }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+postcard = { version = "1.1", default-features = false }
