@@ -25,6 +25,8 @@ use ov_channal::{ChannelId, Message, MsgType, SharedMemory};
 enum ResponseType {
     /// No response data (just requestid)
     Empty,
+    /// Usize
+    Usize,
     /// i32 response
     I32,
     /// (i32, i32) tuple response
@@ -175,6 +177,11 @@ fn ipi_irq_handler() {
                                         add_ipi_message(format!("Response {}: OK", rid));
                                     }
                                 }
+                                ResponseType::Usize => {
+                                    if let Some((_, result)) = msg.as_response::<usize>() {
+                                        add_ipi_message(format!("Response {}: {}", rid, result));
+                                    }
+                                }
                                 ResponseType::I32 => {
                                     if let Some((_, result)) = msg.as_response::<i32>() {
                                         add_ipi_message(format!("Response {}: {}", rid, result));
@@ -320,7 +327,7 @@ impl DeviceOps for IpiDevice {
                 }
             } else if cmd == "hello" {
                 // Call hello_world function
-                let rid = register_request(ResponseType::Empty);
+                let rid = register_request(ResponseType::Usize);
                 unsafe {
                     let shm = SharedMemory::at(axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(INTERCOM_SHM_BASE)).as_ptr() as usize);
                     if let Ok(tx) = shm.sender(ChannelId::new(0)) {
