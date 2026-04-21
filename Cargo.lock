@@ -873,6 +873,7 @@ dependencies = [
 [[package]]
 name = "axplat-riscv64-visionfive2"
 version = "0.1.0-pre.2"
+source = "git+https://github.com/Oveln/axplat-riscv64-visionfive2.git?branch=embassy_preempt_Visionfive2#17bde1f4275d5ef85f380aad45180642873fee75"
 dependencies = [
  "axconfig-macros",
  "axcpu",
