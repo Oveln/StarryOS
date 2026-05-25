@@ -51,7 +51,8 @@ repository.workspace = true
 [features]
 default = []
 qemu = [
-    "axfeat/defplat",
+    "dep:axplat-riscv64-qemu-virt",
+    "axfeat/myplat",
     "axfeat/bus-pci",
 
     "axfeat/display",
@@ -63,7 +64,7 @@ qemu = [
     "axfeat/fs-ng-times",
     "starry-kernel/dev-log",
 ]
-smp = ["axfeat/smp", "axplat-riscv64-visionfive2?/smp"]
+smp = ["axfeat/smp", "axplat-riscv64-qemu-virt?/smp"]
 
 vf2 = ["dep:axplat-riscv64-visionfive2", "axfeat/driver-sdmmc"]
 
@@ -74,6 +75,11 @@ path = "src/main.rs"
 [dependencies]
 axfeat.workspace = true
 starry-kernel.workspace = true
+
+[dependencies.axplat-riscv64-qemu-virt]
+path = "../modules/axplat-riscv64-qemu-virt"
+features = ["fp-simd", "irq", "rtc"]
+optional = true
 
 [dependencies.axplat-riscv64-visionfive2]
 version = "0.1.0-pre.1"

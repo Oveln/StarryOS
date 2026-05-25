@@ -628,7 +628,7 @@ dependencies = [
  "axplat-aarch64-qemu-virt",
  "axplat-dyn",
  "axplat-loongarch64-qemu-virt",
- "axplat-riscv64-qemu-virt",
+ "axplat-riscv64-qemu-virt 0.3.1-pre.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "axplat-x86-pc",
  "cfg-if",
  "fdt-parser",
@@ -849,6 +849,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "axplat-riscv64-qemu-virt"
+version = "0.3.1-pre.6"
+dependencies = [
+ "axconfig-macros",
+ "axcpu",
+ "axplat",
+ "kspin",
+ "lazyinit",
+ "log",
+ "riscv 0.16.0",
+ "riscv_goldfish",
+ "riscv_plic",
+ "sbi-rt",
+ "uart_16550",
 ]
 
 [[package]]
@@ -3199,6 +3216,7 @@ name = "starryos"
 version = "0.2.0-preview.2"
 dependencies = [
  "axfeat",
+ "axplat-riscv64-qemu-virt 0.3.1-pre.6",
  "axplat-riscv64-visionfive2",
  "starry-kernel",
 ]

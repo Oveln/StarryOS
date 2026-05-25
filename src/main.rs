@@ -20,5 +20,8 @@ fn main() {
     starry_kernel::entry::init(&args, &envs);
 }
 
+#[cfg(feature = "qemu")]
+extern crate axplat_riscv64_qemu_virt;
+
 #[cfg(feature = "vf2")]
 extern crate axplat_riscv64_visionfive2;

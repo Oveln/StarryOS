@@ -1,19 +1,9 @@
 //! Shared memory device for AMP inter-core communication.
 //!
-//! Exposes the ov_channal shared memory region at physical address 0x8800_0000
-//! as `/dev/rt_shm`. User processes can:
+//! Exposes the ov_channal shared memory region as `/dev/rt_shm`.
 //!
-//! - `open("/dev/rt_shm", O_RDWR)` — exclusive access (one process only)
-//! - `mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)` — maps the
-//!   shared memory directly into user space
-//! - `ioctl(fd, RT_SHM_IOC_NOTIFY, 0)` — trigger SBI IPI to hart 0 (rt-async)
-//! - `ioctl(fd, RT_SHM_IOC_AWAIT, 0)` — block until an IPI interrupt arrives
-//!   from hart 0, then return
-//!
-//! The shared memory layout is `ov_channal::SharedMemory` (67,072 bytes),
-//! containing two SPSC channels:
-//!   - Channel 0: StarryOS (user) → rt-async (sender)
-//!   - Channel 1: rt-async → StarryOS (user) (receiver)
+//! All physical addresses and constants below **must match** `amp.config`
+//! at the repository root. Update `amp.config` first, then update here.
 
 use core::any::Any;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -25,23 +15,32 @@ use memory_addr::PhysAddrRange;
 
 use crate::pseudofs::{DeviceMmap, DeviceOps};
 
-/// ioctl command: send IPI notification to hart 0 (rt-async).
+/// ioctl command: send IPI notification to hart 1 (rt-async).
+/// amp.config: RTSHM_IOC_NOTIFY
 pub const RT_SHM_IOC_NOTIFY: u32 = 0x7350_01;
 
-/// ioctl command: block until IPI interrupt from hart 0 arrives.
+/// ioctl command: block until IPI interrupt from hart 1 arrives.
+/// amp.config: RTSHM_IOC_AWAIT
 pub const RT_SHM_IOC_AWAIT: u32 = 0x7350_02;
 
 /// Physical base address of the shared memory region.
+/// amp.config: SHMBASE
 const SHM_PHYS_BASE: usize = 0x8800_0000;
 
-/// Size of `ov_channal::SharedMemory`: 2 channels × 131 × 256 bytes = 67,072.
+/// Size of `ov_channal::SharedMemory`: 2 channels × 131 × 256 bytes.
+/// amp.config: SHMSIZE
 const SHM_SIZE: usize = 67072;
 
 /// RISC-V Supervisor Software Interrupt cause (used as IRQ number).
+/// amp.config: (IPI_IRQ, derived from RISC-V spec)
 const IPI_IRQ: usize = 0x8000_0000_0000_0001;
 
-/// SBI IPI extension ID (standard: 0x735049).
+/// SBI IPI extension ID.
+/// amp.config: SBI_EXT_IPI
 const SBI_EXT_IPI: usize = 0x735049;
+
+/// SBI send_ipi function ID.
+/// amp.config: SBI_FUNC_SEND_IPI
 const SBI_FUNC_SEND_IPI: usize = 0x00;
 
 static OPENED: AtomicBool = AtomicBool::new(false);
@@ -50,10 +49,10 @@ static IPC_PENDING: AtomicBool = AtomicBool::new(false);
 
 static IPC_POLLSET: PollSet = PollSet::new();
 
-/// Send IPI to hart 0 via standard SBI ecall.
+/// Send IPI to hart 1 (rt-async) via standard SBI ecall.
 #[cfg(target_arch = "riscv64")]
-fn sbi_send_ipi_to_hart0() -> VfsResult<usize> {
-    let hart_mask: usize = 0x1;
+fn sbi_send_ipi_to_rt_async() -> VfsResult<usize> {
+    let hart_mask: usize = 0x2;
     let hart_mask_base: usize = 0x0;
 
     let mut error: usize;
@@ -78,11 +77,11 @@ fn sbi_send_ipi_to_hart0() -> VfsResult<usize> {
 }
 
 #[cfg(not(target_arch = "riscv64"))]
-fn sbi_send_ipi_to_hart0() -> VfsResult<usize> {
+fn sbi_send_ipi_to_rt_async() -> VfsResult<usize> {
     Err(VfsError::Unsupported)
 }
 
-/// IPI interrupt handler — called when hart 0 sends an IPI to us.
+/// IPI interrupt handler — called when hart 1 (rt-async) sends an IPI to us.
 #[cfg(target_arch = "riscv64")]
 fn ipi_irq_handler() {
     unsafe {
@@ -128,7 +127,7 @@ impl DeviceOps for RtShmDevice {
 
     fn ioctl(&self, cmd: u32, _arg: usize) -> VfsResult<usize> {
         match cmd {
-            RT_SHM_IOC_NOTIFY => sbi_send_ipi_to_hart0(),
+            RT_SHM_IOC_NOTIFY => sbi_send_ipi_to_rt_async(),
             RT_SHM_IOC_AWAIT => {
                 use axtask::future::{block_on, interruptible};
                 use core::future::poll_fn;
