@@ -35,13 +35,8 @@ const SHM_SIZE: usize = 67072;
 /// amp.config: (IPI_IRQ, derived from RISC-V spec)
 const IPI_IRQ: usize = 0x8000_0000_0000_0001;
 
-/// SBI IPI extension ID.
-/// amp.config: SBI_EXT_IPI
-const SBI_EXT_IPI: usize = 0x735049;
-
-/// SBI send_ipi function ID.
-/// amp.config: SBI_FUNC_SEND_IPI
-const SBI_FUNC_SEND_IPI: usize = 0x00;
+const CLINT_BASE: usize = 0x0200_0000;
+const CLINT_MSIP1_OFFSET: usize = 0x4;
 
 static OPENED: AtomicBool = AtomicBool::new(false);
 
@@ -49,35 +44,19 @@ static IPC_PENDING: AtomicBool = AtomicBool::new(false);
 
 static IPC_POLLSET: PollSet = PollSet::new();
 
-/// Send IPI to hart 1 (rt-async) via standard SBI ecall.
 #[cfg(target_arch = "riscv64")]
-fn sbi_send_ipi_to_rt_async() -> VfsResult<usize> {
-    let hart_mask: usize = 0x2;
-    let hart_mask_base: usize = 0x0;
-
-    let mut error: usize;
-    let mut _value: usize;
-
+fn send_ipi_to_rt_async() -> VfsResult<usize> {
+    let vaddr = axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(
+        CLINT_BASE + CLINT_MSIP1_OFFSET,
+    ));
     unsafe {
-        core::arch::asm!(
-            "ecall",
-            inlateout("a0") hart_mask => error,
-            inlateout("a1") hart_mask_base => _value,
-            in("a6") SBI_FUNC_SEND_IPI,
-            in("a7") SBI_EXT_IPI,
-        );
+        core::ptr::write_volatile(vaddr.as_ptr() as *mut u32, 1);
     }
-
-    if error == 0 {
-        Ok(0)
-    } else {
-        warn!("rt_shm: SBI IPI failed with error {}", error);
-        Err(VfsError::Io)
-    }
+    Ok(0)
 }
 
 #[cfg(not(target_arch = "riscv64"))]
-fn sbi_send_ipi_to_rt_async() -> VfsResult<usize> {
+fn send_ipi_to_rt_async() -> VfsResult<usize> {
     Err(VfsError::Unsupported)
 }
 
@@ -127,7 +106,7 @@ impl DeviceOps for RtShmDevice {
 
     fn ioctl(&self, cmd: u32, _arg: usize) -> VfsResult<usize> {
         match cmd {
-            RT_SHM_IOC_NOTIFY => sbi_send_ipi_to_rt_async(),
+            RT_SHM_IOC_NOTIFY => send_ipi_to_rt_async(),
             RT_SHM_IOC_AWAIT => {
                 use axtask::future::{block_on, interruptible};
                 use core::future::poll_fn;
