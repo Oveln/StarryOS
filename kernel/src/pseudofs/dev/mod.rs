@@ -5,7 +5,7 @@ mod event;
 mod fb;
 #[cfg(feature = "dev-log")]
 mod log;
-mod ipi;
+mod rt_shm;
 mod r#loop;
 #[cfg(feature = "memtrack")]
 mod memtrack;
@@ -270,14 +270,14 @@ fn builder(fs: Arc<SimpleFs>) -> DirMaker {
         ),
     );
 
-    // IPI device - sends SBI IPI to hart 0 on write
+    // AMP shared memory device - mmap + ioctl for IPC with rt-async (hart 0)
     root.add(
-        "ipi",
+        "rt_shm",
         Device::new(
             fs.clone(),
             NodeType::CharacterDevice,
-            DeviceId::new(10, 200),
-            Arc::new(ipi::IpiDevice::new()),
+            DeviceId::new(10, 201),
+            Arc::new(rt_shm::RtShmDevice::new()),
         ),
     );
 

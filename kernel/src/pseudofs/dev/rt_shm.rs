@@ -23,7 +23,7 @@ use axfs_ng_vfs::{NodeFlags, VfsError, VfsResult};
 use axpoll::{IoEvents, PollSet, Pollable};
 use memory_addr::PhysAddrRange;
 
-use crate::pseudofs::DeviceMmap;
+use crate::pseudofs::{DeviceMmap, DeviceOps};
 
 /// ioctl command: send IPI notification to hart 0 (rt-async).
 pub const RT_SHM_IOC_NOTIFY: u32 = 0x7350_01;
