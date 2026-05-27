@@ -212,7 +212,7 @@ pub fn sys_mmap(
                                 if range.is_empty() {
                                     return Err(AxError::InvalidInput);
                                 }
-                                length = length.min(range.size().align_down(page_size));
+                                length = length.min(range.size().align_up(page_size));
                                 Backend::new_linear(
                                     start.as_usize() as isize - range.start.as_usize() as isize,
                                 )

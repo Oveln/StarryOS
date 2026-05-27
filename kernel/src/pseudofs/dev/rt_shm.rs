@@ -23,13 +23,17 @@ pub const RT_SHM_IOC_NOTIFY: u32 = 0x7350_01;
 /// amp.config: RTSHM_IOC_AWAIT
 pub const RT_SHM_IOC_AWAIT: u32 = 0x7350_02;
 
+/// ioctl command: clear stale IPI pending flag (non-blocking).
+pub const RT_SHM_IOC_CLR_PENDING: u32 = 0x7350_03;
+
 /// Physical base address of the shared memory region.
 /// amp.config: SHMBASE
 const SHM_PHYS_BASE: usize = 0x8800_0000;
 
-/// Size of `ov_channal::SharedMemory`: 2 channels × 131 × 256 bytes.
+/// Size of `ov_channels::SharedMemory`: 2 channels × 131 × 256 bytes = 67072.
+/// Rounded up to page boundary (17 × 4096 = 69632) to ensure full coverage.
 /// amp.config: SHMSIZE
-const SHM_SIZE: usize = 67072;
+const SHM_SIZE: usize = 69632;
 
 /// RISC-V Supervisor Software Interrupt cause (used as IRQ number).
 /// amp.config: (IPI_IRQ, derived from RISC-V spec)
@@ -65,7 +69,10 @@ fn send_ipi_to_rt_async() -> VfsResult<usize> {
 fn ipi_irq_handler() {
     unsafe {
         core::arch::asm!("csrc sip, {}", const 2_usize);
+        let msip0 = axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(CLINT_BASE));
+        core::ptr::write_volatile(msip0.as_ptr() as *mut u32, 0);
     }
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
     IPC_PENDING.store(true, Ordering::Release);
     IPC_POLLSET.wake();
 }
@@ -121,6 +128,10 @@ impl DeviceOps for RtShmDevice {
                     }
                 })))
                 .map_err(|_| VfsError::Interrupted)
+            }
+            RT_SHM_IOC_CLR_PENDING => {
+                IPC_PENDING.store(false, Ordering::Release);
+                Ok(0)
             }
             _ => Err(VfsError::InvalidInput),
         }
