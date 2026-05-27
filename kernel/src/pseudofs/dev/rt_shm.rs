@@ -50,6 +50,7 @@ static IPC_POLLSET: PollSet = PollSet::new();
 
 #[cfg(target_arch = "riscv64")]
 fn send_ipi_to_rt_async() -> VfsResult<usize> {
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     let vaddr = axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(
         CLINT_BASE + CLINT_MSIP1_OFFSET,
     ));
