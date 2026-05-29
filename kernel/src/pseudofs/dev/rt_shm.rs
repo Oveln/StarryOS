@@ -2,8 +2,8 @@
 //!
 //! Exposes the ov_channal shared memory region as `/dev/rt_shm`.
 //!
-//! All physical addresses and constants below **must match** `amp.config`
-//! at the repository root. Update `amp.config` first, then update here.
+//! All physical addresses and constants below are generated from `amp.toml`
+//! at the repository root via `build.rs`.
 
 use core::any::Any;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -15,31 +15,30 @@ use memory_addr::PhysAddrRange;
 
 use crate::pseudofs::{DeviceMmap, DeviceOps};
 
+mod amp {
+    include!(concat!(env!("OUT_DIR"), "/amp_gen.rs"));
+}
+
 /// ioctl command: send IPI notification to hart 1 (rt-async).
-/// amp.config: RTSHM_IOC_NOTIFY
 pub const RT_SHM_IOC_NOTIFY: u32 = 0x7350_01;
 
 /// ioctl command: block until IPI interrupt from hart 1 arrives.
-/// amp.config: RTSHM_IOC_AWAIT
 pub const RT_SHM_IOC_AWAIT: u32 = 0x7350_02;
 
 /// ioctl command: clear stale IPI pending flag (non-blocking).
 pub const RT_SHM_IOC_CLR_PENDING: u32 = 0x7350_03;
 
-/// Physical base address of the shared memory region.
-/// amp.config: SHMBASE
-const SHM_PHYS_BASE: usize = 0x8800_0000;
+/// Physical base address of the shared memory region (from amp.toml: SHMBASE).
+const SHM_PHYS_BASE: usize = amp::SHMBASE;
 
-/// Size of `ov_channels::SharedMemory`: 2 channels × 131 × 256 bytes = 67072.
-/// Rounded up to page boundary (17 × 4096 = 69632) to ensure full coverage.
-/// amp.config: SHMSIZE
-const SHM_SIZE: usize = 69632;
+/// Size of `ov_channels::SharedMemory` (from amp.toml: SHMSIZE).
+const SHM_SIZE: usize = amp::SHMSIZE;
 
 /// RISC-V Supervisor Software Interrupt cause (used as IRQ number).
-/// amp.config: (IPI_IRQ, derived from RISC-V spec)
 const IPI_IRQ: usize = 0x8000_0000_0000_0001;
 
-const CLINT_BASE: usize = 0x0200_0000;
+/// CLINT base address (from amp.toml: CLINTBASE).
+const CLINT_BASE: usize = amp::CLINTBASE;
 const CLINT_MSIP1_OFFSET: usize = 0x4;
 
 static OPENED: AtomicBool = AtomicBool::new(false);
