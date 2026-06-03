@@ -1,16 +1,17 @@
 //! Shared memory device for AMP inter-core communication.
 //!
-//! Exposes the ov_channal shared memory region as `/dev/rt_shm`.
+//! Exposes the ov_channels shared memory region as `/dev/rt_shm`.
 //!
 //! All physical addresses and constants below are generated from `amp.toml`
 //! at the repository root via `build.rs`.
 
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, Ordering};
-use core::task::Context;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::task::{Context, Waker};
 
 use axfs_ng_vfs::{NodeFlags, VfsError, VfsResult};
-use axpoll::{IoEvents, PollSet, Pollable};
+use axpoll::{IoEvents, Pollable};
+use kspin::SpinNoIrq;
 use memory_addr::PhysAddrRange;
 
 use crate::pseudofs::{DeviceMmap, DeviceOps};
@@ -22,10 +23,10 @@ mod amp {
 /// ioctl command: send IPI notification to hart 1 (rt-async).
 pub const RT_SHM_IOC_NOTIFY: u32 = 0x7350_01;
 
-/// ioctl command: block until IPI interrupt from hart 1 arrives.
+/// ioctl command: block until CH1 has pending messages.
 pub const RT_SHM_IOC_AWAIT: u32 = 0x7350_02;
 
-/// ioctl command: clear stale IPI pending flag (non-blocking).
+/// ioctl command: no-op (kept for ABI compatibility).
 pub const RT_SHM_IOC_CLR_PENDING: u32 = 0x7350_03;
 
 /// Physical base address of the shared memory region (from amp.toml: SHMBASE).
@@ -41,11 +42,32 @@ const IPI_IRQ: usize = 0x8000_0000_0000_0001;
 const CLINT_BASE: usize = amp::CLINTBASE;
 const CLINT_MSIP1_OFFSET: usize = 0x4;
 
+const CH1_RING_READ_OFFSET: usize = 0x8400;
+const CH1_RING_WRITE_OFFSET: usize = 0x8408;
+
 static OPENED: AtomicBool = AtomicBool::new(false);
 
-static IPC_PENDING: AtomicBool = AtomicBool::new(false);
+/// IRQ-safe waker storage. `SpinNoIrq` disables local IRQs during lock,
+/// preventing the IPI handler from deadlocking on the same hart.
+static IPC_WAKER: SpinNoIrq<Option<Waker>> = SpinNoIrq::new(None);
 
-static IPC_POLLSET: PollSet = PollSet::new();
+fn shm_vaddr() -> usize {
+    axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(SHM_PHYS_BASE)).as_ptr() as usize
+}
+
+fn ch1_has_pending() -> bool {
+    let base = shm_vaddr();
+    let r = unsafe {
+        (*((base + CH1_RING_READ_OFFSET) as *const AtomicUsize))
+            .load(Ordering::Acquire)
+    };
+    let w = unsafe {
+        (*((base + CH1_RING_WRITE_OFFSET) as *const AtomicUsize))
+            .load(Ordering::Acquire)
+    };
+    trace!("rt_shm: ch1 read {}, write {}", r, w);
+    r != w
+}
 
 #[cfg(target_arch = "riscv64")]
 fn send_ipi_to_rt_async() -> VfsResult<usize> {
@@ -65,16 +87,15 @@ fn send_ipi_to_rt_async() -> VfsResult<usize> {
 }
 
 /// IPI interrupt handler — called when hart 1 (rt-async) sends an IPI to us.
+///
+/// Wakes the task blocked in `AWAIT`. The waker is stored in [`IPC_WAKER`];
+/// message availability is determined directly from CH1's ring buffer, so
+/// a spurious wakeup is harmless.
 #[cfg(target_arch = "riscv64")]
 fn ipi_irq_handler() {
-    unsafe {
-        core::arch::asm!("csrc sip, {}", const 2_usize);
-        let msip0 = axhal::mem::phys_to_virt(memory_addr::PhysAddr::from(CLINT_BASE));
-        core::ptr::write_volatile(msip0.as_ptr() as *mut u32, 0);
+    if let Some(waker) = IPC_WAKER.lock().take() {
+        waker.wake();
     }
-    core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
-    IPC_PENDING.store(true, Ordering::Release);
-    IPC_POLLSET.wake();
 }
 
 pub struct RtShmDevice {
@@ -118,21 +139,26 @@ impl DeviceOps for RtShmDevice {
                 use axtask::future::{block_on, interruptible};
                 use core::future::poll_fn;
                 use core::task::Poll;
-
                 block_on(interruptible(poll_fn(|cx| {
-                    IPC_POLLSET.register(cx.waker());
-                    if IPC_PENDING.swap(false, Ordering::AcqRel) {
+                    if ch1_has_pending() {
+                        debug!("rt_shm: pending message detected in AWAIT");
+                        return Poll::Ready(0usize);
+                    }
+                    debug!("rt_shm: no pending message, blocking in AWAIT");
+                    // SpinNoIrq disables local IRQs; register and re-check
+                    // are atomic w.r.t. the IPI handler on this hart.
+                    let mut guard = IPC_WAKER.lock();
+                    if ch1_has_pending() {
+                        debug!("rt_shm: pending message detected after register in AWAIT");
                         Poll::Ready(0usize)
                     } else {
+                        *guard = Some(cx.waker().clone());
                         Poll::Pending
                     }
                 })))
                 .map_err(|_| VfsError::Interrupted)
             }
-            RT_SHM_IOC_CLR_PENDING => {
-                IPC_PENDING.store(false, Ordering::Release);
-                Ok(0)
-            }
+            RT_SHM_IOC_CLR_PENDING => Ok(0),
             _ => Err(VfsError::InvalidInput),
         }
     }
@@ -160,14 +186,14 @@ impl DeviceOps for RtShmDevice {
 impl Pollable for RtShmDevice {
     fn poll(&self) -> IoEvents {
         let mut events = IoEvents::OUT;
-        if IPC_PENDING.load(Ordering::Acquire) {
+        if ch1_has_pending() {
             events |= IoEvents::IN;
         }
         events
     }
 
     fn register(&self, context: &mut Context<'_>, _events: IoEvents) {
-        IPC_POLLSET.register(context.waker());
+        *IPC_WAKER.lock() = Some(context.waker().clone());
     }
 }
 
